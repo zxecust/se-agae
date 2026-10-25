@@ -1,0 +1,54 @@
+{
+  "seed": 42,
+  "device": "auto",
+  "train_ratio": 0.8,
+  "data": {
+    "raw_dir": "data/raw/case1",
+    "mesh": "data/raw/case1/case1.inp",
+    "graph_dir": "data/graph/case1",
+    "condition_dir": "data/conditions/case1/processed",
+    "condition_pattern": "case1_{condition}.csv",
+    "field": "S_Mises",
+    "dt": 100.0,
+    "output_dir": "outputs/case1/S_Mises"
+  },
+  "features": {
+    "columns": ["Amp-HP-TEMP", "Amp-HP-WmK", "Amp-IP-TEMP", "Amp-IP-WmK", "Amp-oil", "Amp-Speed", "temperature"],
+    "difference_columns": ["Amp-HP-TEMP", "Amp-HP-WmK", "Amp-IP-TEMP", "Amp-IP-WmK", "Amp-Speed"],
+    "add_frame": true
+  },
+  "model": {
+    "latent_dim": 16,
+    "hidden_dim": 96,
+    "encoder_layers": 4,
+    "decoder_layers": 4,
+    "use_pos": true,
+    "attention_pool": true
+  },
+  "autoencoder": {
+    "epochs": 300,
+    "lr": 0.0005,
+    "weight_decay": 0.000001,
+    "patience": 50,
+    "batch_size": 20,
+    "grad_clip": 5.0,
+    "clamp_normalized": 10000.0,
+    "danger_nodes": [27703, 27819, 27898, 28008, 28120, 28199, 28319, 28512, 28692, 28841, 27564, 24779],
+    "danger_neighbors": 8,
+    "danger_weight": 1.0
+  },
+  "predictor": {
+    "epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.000001,
+    "patience": 30,
+    "batch_size": 8,
+    "grad_clip": 5.0,
+    "hidden_size": 128,
+    "num_layers": 2,
+    "dropout": 0.1,
+    "whiten_loss": true,
+    "delta_weight": 0.7,
+    "delta2_weight": 0.05
+  }
+}

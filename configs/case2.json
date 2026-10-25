@@ -1,0 +1,54 @@
+{
+  "seed": 42,
+  "device": "auto",
+  "train_ratio": 0.8,
+  "data": {
+    "raw_dir": "data/raw/case2",
+    "mesh": "data/raw/case2/case2.inp",
+    "graph_dir": "data/graph/case2",
+    "condition_dir": "data/conditions/case2/processed",
+    "condition_pattern": "case2_{condition}.csv",
+    "field": "D",
+    "dt": 100.0,
+    "output_dir": "outputs/case2/D"
+  },
+  "features": {
+    "columns": ["hold_time", "cycle", "strain_range"],
+    "difference_columns": [],
+    "add_frame": false
+  },
+  "model": {
+    "latent_dim": 16,
+    "hidden_dim": 96,
+    "encoder_layers": 4,
+    "decoder_layers": 4,
+    "use_pos": true,
+    "attention_pool": true
+  },
+  "autoencoder": {
+    "epochs": 300,
+    "lr": 0.0005,
+    "weight_decay": 0.000001,
+    "patience": 50,
+    "batch_size": 20,
+    "grad_clip": 5.0,
+    "clamp_normalized": 10000.0,
+    "danger_nodes": [125, 121, 1051, 1015],
+    "danger_neighbors": 8,
+    "danger_weight": 1.0
+  },
+  "predictor": {
+    "epochs": 500,
+    "lr": 0.001,
+    "weight_decay": 0.000001,
+    "patience": 30,
+    "batch_size": 8,
+    "grad_clip": 5.0,
+    "hidden_size": 128,
+    "num_layers": 2,
+    "dropout": 0.1,
+    "whiten_loss": true,
+    "delta_weight": 0.7,
+    "delta2_weight": 0.05
+  }
+}
