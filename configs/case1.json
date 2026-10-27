@@ -9,7 +9,6 @@
     "condition_dir": "data/conditions/case1/processed",
     "condition_pattern": "case1_{condition}.csv",
     "field": "S_Mises",
-    "dt": 100.0,
     "output_dir": "outputs/case1/S_Mises"
   },
   "features": {

@@ -9,7 +9,6 @@
     "condition_dir": "data/conditions/case2/processed",
     "condition_pattern": "case2_{condition}.csv",
     "field": "D",
-    "dt": 100.0,
     "output_dir": "outputs/case2/D"
   },
   "features": {
