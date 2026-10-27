@@ -1,15 +1,14 @@
 {
+  "case": "case1",
   "seed": 42,
   "device": "auto",
   "train_ratio": 0.8,
   "data": {
     "raw_dir": "data/raw/case1",
     "mesh": "data/raw/case1/case1.inp",
-    "graph_dir": "data/graph/case1",
     "condition_dir": "data/conditions/case1/processed",
     "condition_pattern": "case1_{condition}.csv",
-    "field": "S_Mises",
-    "output_dir": "outputs/case1/S_Mises"
+    "field": "S_Mises"
   },
   "features": {
     "columns": ["Amp-HP-TEMP", "Amp-HP-WmK", "Amp-IP-TEMP", "Amp-IP-WmK", "Amp-oil", "Amp-Speed", "temperature"],
@@ -27,7 +26,7 @@
   "autoencoder": {
     "epochs": 300,
     "lr": 0.0005,
-    "weight_decay": 0.000001,
+    "weight_decay": 1e-06,
     "patience": 50,
     "batch_size": 20,
     "grad_clip": 5.0,
@@ -39,7 +38,7 @@
   "predictor": {
     "epochs": 500,
     "lr": 0.001,
-    "weight_decay": 0.000001,
+    "weight_decay": 1e-06,
     "patience": 30,
     "batch_size": 8,
     "grad_clip": 5.0,
@@ -49,5 +48,22 @@
     "whiten_loss": true,
     "delta_weight": 0.7,
     "delta2_weight": 0.05
+  },
+  "paths": {
+    "data_root": "D:/ROM",
+    "models_root": "models",
+    "runs_root": "runs",
+    "graph_dir": "{case}/graph/{field}",
+    "latent_dir": "{case}/latent/{field}",
+    "recon_dir": "{case}/recon/{field}",
+    "pred_dir": "{case}/pred/{field}"
+  },
+  "selection": {
+    "ae_run": "",
+    "lstm_run": ""
+  },
+  "export": {
+    "recon_conditions": [],
+    "pred_csv": false
   }
 }

@@ -1,18 +1,34 @@
 {
+  "case": "case_hip_rotor",
   "seed": null,
   "device": null,
   "train_ratio": null,
   "data": {
     "raw_dir": "C:/Users/zixuan/Documents/ABAQUS/model/rotor-blade-rom/data/HIP_Rotor/raw",
     "mesh": "C:/Users/zixuan/Documents/ABAQUS/model/rotor-blade-rom/data/HIP_Rotor/FEM/condition_CSCYC_01/Stress/condition_CSCYC_01_stress.inp",
-    "graph_dir": "data/graph/case_hip_rotor",
     "condition_dir": "",
     "condition_pattern": "",
-    "field": "stress",
-    "output_dir": ""
+    "field": "stress"
   },
   "features": {},
   "model": {},
   "autoencoder": {},
-  "predictor": {}
+  "predictor": {},
+  "paths": {
+    "data_root": "D:/ROM",
+    "models_root": "models",
+    "runs_root": "runs",
+    "graph_dir": "{case}/graph/{field}",
+    "latent_dir": "{case}/latent/{field}",
+    "recon_dir": "{case}/recon/{field}",
+    "pred_dir": "{case}/pred/{field}"
+  },
+  "selection": {
+    "ae_run": "",
+    "lstm_run": ""
+  },
+  "export": {
+    "recon_conditions": [],
+    "pred_csv": false
+  }
 }
