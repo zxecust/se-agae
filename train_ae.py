@@ -55,22 +55,22 @@ def train(config):
     # FieldFrames 将序列拆成单帧并归一化及可选限幅，batch_size 按快照数计
     # 批数据为 [B,N,1]，B 为当前 batch 的场快照数
     loaders = [DataLoader(
-                    # 将所选工况的场值按帧拆分为单帧样本，归一化后可选限幅
-                    FieldFrames(fields, split[key], mean, std, ae["clamp_normalized"]),
-                    batch_size=ae["batch_size"],  # 将多帧场值组成一个 batch，按快照数计
-                    shuffle=(key == "train")
-                    ) 
-                    for key in ("train", "val")
-                ]
+        # 将所选工况的场值按帧拆分为单帧样本，归一化后可选限幅
+        FieldFrames(fields, split[key], mean, std, ae["clamp_normalized"]),
+        batch_size=ae["batch_size"],  # 将多帧场值组成一个 batch，按快照数计
+        shuffle=(key == "train")
+        ) 
+        for key in ("train", "val")
+    ]
     # 创建自编码器
     model = Autoencoder(graph["pos"].shape[1], config["model"]).to(device)
     # 危险节点按有限元标签配置，映射下标后扩展 BFS 邻居，生成单图 mask [N]
     mask = danger_mask(
-                        graph["node_ids"], 
-                        graph["edge_index"],
-                        ae["danger_nodes"] if ae["danger_weight"] > 0 else [], 
-                        ae["danger_neighbors"]
-                    ).to(device)
+        graph["node_ids"], 
+        graph["edge_index"],
+        ae["danger_nodes"] if ae["danger_weight"] > 0 else [], 
+        ae["danger_neighbors"]
+    ).to(device)
 
     def step(values):
         """返回归一化场值的重构损失及快照数，用于轮次损失加权"""
@@ -118,14 +118,16 @@ def train(config):
                     reconstruction = model.decoder(z, pos, edges, batch).reshape(len(values), -1)
                     # 反归一化后与未限幅的原始场值比较，误差保持字段原始单位
                     physical = reconstruction.cpu().numpy() * std + mean
+                    # 计算 RMSE 和 MAE，按帧和节点归约
                     difference = physical.astype(np.float64) - fields[name][frame:frame + len(values)]
                     squares += np.square(difference).sum()
                     absolute += np.abs(difference).sum()
                     count += difference.size
-                    if reconstructed is not None:
+                    if reconstructed is not None: # 仅导出配置明确指定的工况
                         reconstructed[frame:frame + len(values)] = physical
                     frame += len(values)
                     parts.append(z.cpu().numpy())
+                # 完成当前工况重构文件的写入
                 if reconstructed is not None:
                     reconstructed.flush()
                     del reconstructed
@@ -141,20 +143,41 @@ def train(config):
                     val_count += count
         # 模型保留标准化图和归一化参数；不嵌入潜变量或完整物理场
         bundle = {
-            "case": config["case"], "field": config["data"]["field"], "stage": "ae", "run_id": run_id,
+            # 模型身份与来源
+            "case": config["case"], 
+            "field": config["data"]["field"], 
+            "stage": "ae", 
+            "run_id": run_id,
+            # 模型配置和权重
             "model_config": config["model"],
-            "state_dict": {key: value.cpu() for key, value in model.state_dict().items()},
-            "graph": graph, "position_mean": pos_mean, "position_std": pos_std,
-            "field_mean": mean, "field_std": std,
+            # 最佳模型参数
+            "state_dict": {
+                key: value.cpu() 
+                for key, value in model.state_dict().items()
+                },
+            # 图结构和归一化参数
+            "graph": graph, 
+            # 坐标归一化参数
+            "position_mean": pos_mean, 
+            "position_std": pos_std,
+            # 场归一化参数
+            "field_mean": mean, ""
+            "field_std": std,
         }
+        # 保存模型文件和训练指标
         target = model_path(config, "ae", run_id)
         torch.save(bundle, target)
-        write_rows(records / "metrics.csv", metrics)
+        write_rows(records / "metrics.csv", metrics) # 保存主公狂评估表
         # 汇总指标按全部验证帧和节点归约，不对工况 RMSE 再做简单平均
-        run["metrics"] = {"val_rmse": float(np.sqrt(val_squares / val_count)),
-                          "val_mae": float(val_absolute / val_count)}
-        run["artifacts"] = {"model": reference(config, "models", target),
-                            "latent": reference(config, "latent", latent_dir)}
+        run["metrics"] = {
+            "val_rmse": float(np.sqrt(val_squares / val_count)),
+            "val_mae": float(val_absolute / val_count)
+        }
+        # 保存模型、潜变量和重构场的相对路径到 run.json，便于后续引用
+        run["artifacts"] = {
+            "model": reference(config, "models", target),
+            "latent": reference(config, "latent", latent_dir)
+        }
         if recon_names:
             run["artifacts"]["recon"] = reference(config, "recon", paths["recon"] / "ae" / run_id)
         print(f"AE 模型：{target}\n潜变量：{latent_dir}\n训练记录：{records}")
