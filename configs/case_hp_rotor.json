@@ -1,18 +1,18 @@
 {
-  "case": "case2",
+  "case": "case_hp_rotor",
   "seed": 42,
   "device": "auto",
   "train_ratio": 0.8,
   "data": {
-    "raw_dir": "data/raw/case2",
-    "mesh": "data/raw/case2/case2.inp",
-    "condition_dir": "data/conditions/case2/processed",
-    "condition_pattern": "case2_{condition}.csv",
-    "field": "D"
+    "raw_dir": "D:/ABAQUS/model/HTC_Turbine_Rotor/data/HP_Rotor/raw",
+    "mesh": "D:/ABAQUS/model/HTC_Turbine_Rotor/data/HP_Rotor/FEM/condition_CSCYC_01/Stress/condition_CSCYC_01_stress.inp",
+    "condition_dir": "D:/ABAQUS/model/HTC_Turbine_Rotor/data/HP_Rotor/conditions",
+    "condition_pattern": "{condition}.csv",
+    "field": "stress"
   },
   "features": {
-    "columns": ["hold_time", "cycle", "strain_range"],
-    "difference_columns": [],
+    "columns": ["cooling_lambda_h", "initial_field_increment", "startup_time_s", "h_c_w_m2k", "h_d_w_m2k", "h_de_w_m2k", "h_e_w_m2k", "h_f_w_m2k", "main_steam_temperature_c", "inlet_temperature_c", "outlet_temperature_c"],
+    "difference_columns": ["h_c_w_m2k", "h_d_w_m2k", "h_de_w_m2k", "h_e_w_m2k", "h_f_w_m2k", "main_steam_temperature_c", "inlet_temperature_c", "outlet_temperature_c"],
     "add_frame": false
   },
   "model": {
@@ -31,9 +31,9 @@
     "batch_size": 20,
     "grad_clip": 5.0,
     "clamp_normalized": 10000.0,
-    "danger_nodes": [125, 121, 1051, 1015],
+    "danger_nodes": [],
     "danger_neighbors": 8,
-    "danger_weight": 1.0
+    "danger_weight": 0.0
   },
   "predictor": {
     "epochs": 500,
