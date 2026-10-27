@@ -27,9 +27,9 @@ from core.data import condition_features
 from core.models import GNNDecoder, LSTMLatentPredictor
 
 # 留空 MODEL_FILE 时使用配置中明确选择的 LSTM 训练编号
-CONFIG_FILE = "configs/case1.json"
+CONFIG_FILE = "configs/case_hp_rotor.json"
 MODEL_FILE = ""
-CONDITION_FILE = "data/conditions/case1/processed/case1_condition_01.csv"
+CONDITION_FILE = "D:/ABAQUS/model/HTC_Turbine_Rotor/data/HP_Rotor/conditions/condition_CSCYC_01.csv"
 OUTPUT_DIR = ""  # 留空时使用 paths.pred_dir，非空时覆盖预测数据根目录
 DEVICE = "auto"
 BATCH_SIZE = 20

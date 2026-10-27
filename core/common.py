@@ -28,7 +28,7 @@ def read_config(path):
     return config
 
 
-def load_config(default_config="configs/case1.json", argv=None):
+def load_config(default_config="configs/case_hp_rotor.json", argv=None):
     parser = argparse.ArgumentParser(description="SE-AGAE 基础流程")
     parser.add_argument("--config", type=Path, default=default_config)
     args = parser.parse_args(argv)

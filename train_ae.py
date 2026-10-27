@@ -27,7 +27,7 @@ from core.losses import danger_mask, reconstruction_loss
 from core.models import Autoencoder
 
 # 编辑器运行时的默认配置；相对输入路径以项目根目录为基准，--config 可覆盖
-CONFIG_FILE = "configs/case1.json"
+CONFIG_FILE = "configs/case_hp_rotor.json"
 
 
 def train(config):

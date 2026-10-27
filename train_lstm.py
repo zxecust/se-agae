@@ -25,7 +25,7 @@ from core.losses import latent_loss
 from core.models import LSTMLatentPredictor
 
 # 编辑器运行时的默认配置，--config 可覆盖
-CONFIG_FILE = "configs/case1.json"
+CONFIG_FILE = "configs/case_hp_rotor.json"
 
 
 def train(config):

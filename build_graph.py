@@ -26,7 +26,7 @@ from core.artifacts import storage_paths
 from core.data import finite
 
 # 编辑器运行时的默认配置；相对路径以项目根目录为基准，--config 可覆盖
-CONFIG_FILE = "configs/case1.json"
+CONFIG_FILE = "configs/case_hp_rotor.json"
 
 
 def read_inp(path):
