@@ -7,6 +7,8 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
+from core.artifacts import storage_paths
+
 
 def finite(values, name):
     if not np.isfinite(values).all():
@@ -31,15 +33,17 @@ def condition_features(path, config):
 
 def condition_path(config, name):
     data = config["data"]
+    if not data["condition_dir"]:
+        raise ValueError("请设置 data.condition_dir，指向工况 CSV 所在目录。")
     return Path(data["condition_dir"]) / data["condition_pattern"].format(condition=name)
 
 
 def load_fields(config):
-    root = Path(config["data"]["graph_dir"])
-    paths = sorted(root.glob(f"condition_*/field_{config['data']['field']}.npy"))
+    root = storage_paths(config)["graph"]
+    paths = sorted(root.glob(f"condition_*/{config['data']['field']}.npy"))
     if not paths:
         raise FileNotFoundError(f"没有场数据，请先运行 build_graph.py：{root}")
-    # 与旧项目一致，场为单通道；文件以 [T,N] 存放。
+    # 按工况名返回只读内存映射，单通道场数组以 [T,N] 存放
     return {path.parent.name: np.load(path, mmap_mode="r") for path in paths}
 
 
