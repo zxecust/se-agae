@@ -34,13 +34,14 @@ def train(config):
     """训练自编码器，并将模型、潜变量、重构场和训练记录分类保存"""
     device = setup(config)
     paths = storage_paths(config)
-    graph = load_bundle(paths["graph"] / "graph.pt")
+    graph = load_bundle(paths["graph"] / "graph.pt") # 加载图结构，包含 pos、edge_index 和 node_ids
     # 场数据以工况名为键，通过内存映射读取，避免一次载入所有工况
-    fields = load_fields(config)
+    fields = load_fields(config) # 加载所有工况的场数据，返回 {condition: np.ndarray [T,N]} 字典
+    # 验证场数据的形状与图一致，且配置中指定的重构工况必须存在
     for name, values in fields.items():
         if values.ndim != 2 or values.shape[1] != len(graph["pos"]) or len(values) == 0:
             raise ValueError(f"{name} 场数据应为非空 [T,N]，且 N 与图一致。")
-    recon_names = config["export"]["recon_conditions"]
+    recon_names = config["export"]["recon_conditions"] # 按需导出的重构工况列表
     if set(recon_names) - set(fields):
         raise ValueError("export.recon_conditions 包含不存在的工况。")
     # 按完整工况划分，验证集复用训练集全部场值的全局均值和标准差
@@ -53,12 +54,23 @@ def train(config):
     ae = config["autoencoder"]
     # FieldFrames 将序列拆成单帧并归一化及可选限幅，batch_size 按快照数计
     # 批数据为 [B,N,1]，B 为当前 batch 的场快照数
-    loaders = [DataLoader(FieldFrames(fields, split[key], mean, std, ae["clamp_normalized"]),
-                          batch_size=ae["batch_size"], shuffle=(key == "train")) for key in ("train", "val")]
+    loaders = [DataLoader(
+                    # 将所选工况的场值按帧拆分为单帧样本，归一化后可选限幅
+                    FieldFrames(fields, split[key], mean, std, ae["clamp_normalized"]),
+                    batch_size=ae["batch_size"],  # 将多帧场值组成一个 batch，按快照数计
+                    shuffle=(key == "train")
+                    ) 
+                    for key in ("train", "val")
+                ]
+    # 创建自编码器
     model = Autoencoder(graph["pos"].shape[1], config["model"]).to(device)
     # 危险节点按有限元标签配置，映射下标后扩展 BFS 邻居，生成单图 mask [N]
-    mask = danger_mask(graph["node_ids"], graph["edge_index"],
-                       ae["danger_nodes"] if ae["danger_weight"] > 0 else [], ae["danger_neighbors"]).to(device)
+    mask = danger_mask(
+                        graph["node_ids"], 
+                        graph["edge_index"],
+                        ae["danger_nodes"] if ae["danger_weight"] > 0 else [], 
+                        ae["danger_neighbors"]
+                    ).to(device)
 
     def step(values):
         """返回归一化场值的重构损失及快照数，用于轮次损失加权"""
@@ -66,21 +78,25 @@ def train(config):
         # 每帧复制一张独立图，batch 记录展平后各节点所属的快照
         pos, edges, batch = batch_graph(graph, count, device)
         x = values.to(device).reshape(-1, 1)  # [B,N,1] → [B*N,1]
-        prediction = model(x, pos, edges, batch)
+        prediction = model(x, pos, edges, batch) # 预测结果 [B*N,1]，按节点顺序与 x 对齐
         return reconstruction_loss(prediction, x, mask, ae["danger_weight"]), count
 
+    # 开始训练，训练记录和潜变量按 run_id 分类保存
     with run_session(config, "ae") as run:
         run_id = run["run_id"]
         records = record_dir(config, "ae", run_id)
         latent_dir = paths["latent"] / "ae" / run_id
         latent_dir.mkdir(parents=True, exist_ok=False)
+        # 记录训练集和验证集的工况划分、图文件和数据源
         run["split"] = split
         run["sources"] = {"graph": reference(config, "graph", paths["graph"] / "graph.pt")}
         print(f"AE: run={run_id}, device={device}, train={split['train']}, val={split['val']}")
         # fit 恢复验证损失最低轮次的权重并切换到评估模式
-        run["training"] = fit(model, *loaders, step, ae, records / "history.csv")
+        run["training"] = fit(model, *loaders, step, ae, records / "history.csv") # 执行训练
+        # 初始化指标汇总，按验证集所有帧和节点归约
         metrics = []
         val_squares, val_absolute, val_count = 0.0, 0.0, 0
+        # 关闭梯度计算，逐工况评估
         with torch.no_grad():
             # 所有工况按原帧顺序导出，潜变量只存于独立的 latent 目录
             for name in fields:
