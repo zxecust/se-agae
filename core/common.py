@@ -1,4 +1,4 @@
-"""配置、图批处理和两个训练阶段共用的短训练循环。"""
+"""配置、图批处理和两个训练阶段共用的短训练循环"""
 
 import argparse
 import copy
@@ -14,19 +14,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def project_path(path):
-    """所有相对路径以项目根目录为基准，编辑器的工作目录不影响结果。"""
+    """将路径解析到项目根目录，不依赖编辑器的工作目录"""
     return (ROOT / path).resolve()
+
+
+def read_config(path):
+    """读取案例配置；网格、原始 CSV 和工况表的位置独立于大型数据根目录"""
+    with project_path(path).open(encoding="utf-8") as stream:
+        config = json.load(stream)
+    for key in ("raw_dir", "condition_dir", "mesh"):
+        if config["data"][key]:
+            config["data"][key] = str(project_path(config["data"][key]))
+    return config
 
 
 def load_config(default_config="configs/case1.json", argv=None):
     parser = argparse.ArgumentParser(description="SE-AGAE 基础流程")
     parser.add_argument("--config", type=Path, default=default_config)
     args = parser.parse_args(argv)
-    with project_path(args.config).open(encoding="utf-8") as stream:
-        config = json.load(stream)
-    for key in ("raw_dir", "graph_dir", "condition_dir", "output_dir", "mesh"):
-        config["data"][key] = str(project_path(config["data"][key]))
-    return config
+    return read_config(args.config)
 
 
 def setup(config):
@@ -52,11 +58,11 @@ def batch_graph(graph, count, device):
 
 
 def fit(model, train_loader, val_loader, step, config, history_path):
-    """step(batch) 返回损失和计数；保存最佳验证轮次，不包含恢复/回退分支。"""
+    """按 step 返回的计数统计损失，恢复最佳验证权重并返回最佳轮次信息"""
     if config["epochs"] < 1 or config["patience"] < 1:
         raise ValueError("epochs 和 patience 必须为正整数。")
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"])
-    best, best_state, patience = float("inf"), None, 0
+    best, best_state, patience, best_epoch = float("inf"), None, 0, 0
     history = []
     for epoch in range(1, config["epochs"] + 1):
         losses = []
@@ -81,6 +87,7 @@ def fit(model, train_loader, val_loader, step, config, history_path):
         print(f"Epoch {epoch:04d}: train={losses[0]:.6e}, val={losses[1]:.6e}")
         if losses[1] < best:
             best, patience = losses[1], 0
+            best_epoch = epoch
             best_state = copy.deepcopy(model.state_dict())
         else:
             patience += 1
@@ -92,8 +99,9 @@ def fit(model, train_loader, val_loader, step, config, history_path):
         writer = csv.DictWriter(stream, fieldnames=["epoch", "train_loss", "val_loss"])
         writer.writeheader()
         writer.writerows(history)
+    return {"best_epoch": best_epoch, "best_val_loss": best, "epochs": len(history)}
 
 
 def load_bundle(path):
-    # 只加载本项目生成且可信的本地模型文件。
+    # 只加载本项目生成且可信的本地模型文件
     return torch.load(path, map_location="cpu", weights_only=False)
