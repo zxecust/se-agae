@@ -4,9 +4,9 @@
     data.mesh: 含节点坐标和单元连接的 Abaqus INP 文件
     data.raw_dir/condition_*/<field>.csv: 第一列为帧标识，不作为场值导出，其余列为节点场值
 
-输出（位于 data.graph_dir，已有同名文件会被覆盖）:
+输出（位于 paths.graph_dir，相对 paths.data_root，已有同名文件会被覆盖）:
     graph.pt: 包含 pos [N,D]、edge_index [2,E]、node_ids [N] 的字典
-    condition_*/field_<field>.npy: float32 场数组 [T,N]
+    condition_*/<field>.npy: float32 场数组 [T,N]
     N、D、E、T 分别为节点数、坐标维度、有向边数和该工况帧数
 
 处理流程:
@@ -22,6 +22,7 @@ import pandas as pd
 import torch
 
 from core.common import load_bundle, load_config
+from core.artifacts import storage_paths
 from core.data import finite
 
 # 编辑器运行时的默认配置；相对路径以项目根目录为基准，--config 可覆盖
@@ -75,9 +76,11 @@ def csv_node_ids(columns):
 
 def build(config):
     """统一各工况的节点顺序，构建并校验共享图，导出所选字段"""
-    # 1. 第一步，获取数据配置字典，包括原始数据目录和输出图目录
+    # 1. 第一步，读取独立配置的 ABAQUS 输入路径和图输出目录
     data = config["data"] # 获取数据配置字典
-    root, output = Path(data["raw_dir"]), Path(data["graph_dir"])
+    if not data["raw_dir"] or not data["mesh"]:
+        raise ValueError("请设置 data.raw_dir 和 data.mesh，指向原始 CSV 与 INP 文件。")
+    root, output = Path(data["raw_dir"]), storage_paths(config)["graph"]
     # 按工况目录名排序并拼接字段路径；文件是否存在由后续读取确认
     sources = [folder / f"{data['field']}.csv" for folder in sorted(root.glob("condition_*")) if folder.is_dir()]
     if not sources:
@@ -142,7 +145,7 @@ def build(config):
             raise ValueError(f"场序列为空：{source}")
         folder = output / source.parent.name
         folder.mkdir(exist_ok=True)
-        np.save(folder / f"field_{data['field']}.npy", values)
+        np.save(folder / f"{data['field']}.npy", values)
         print(f"{source.parent.name}: field={values.shape}")
     # 4. 第四步，打印图信息
     print(f"Graph: nodes={len(node_ids)}, edges={len(mapped)}, saved to {output}")
