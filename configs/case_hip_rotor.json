@@ -1,0 +1,18 @@
+{
+  "seed": null,
+  "device": null,
+  "train_ratio": null,
+  "data": {
+    "raw_dir": "C:/Users/zixuan/Documents/ABAQUS/model/rotor-blade-rom/data/HIP_Rotor/raw",
+    "mesh": "C:/Users/zixuan/Documents/ABAQUS/model/rotor-blade-rom/data/HIP_Rotor/FEM/condition_CSCYC_01/Stress/condition_CSCYC_01_stress.inp",
+    "graph_dir": "data/graph/case_hip_rotor",
+    "condition_dir": "",
+    "condition_pattern": "",
+    "field": "stress",
+    "output_dir": ""
+  },
+  "features": {},
+  "model": {},
+  "autoencoder": {},
+  "predictor": {}
+}
