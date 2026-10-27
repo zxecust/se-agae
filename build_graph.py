@@ -2,13 +2,11 @@
 
 输入:
     data.mesh: 含节点坐标和单元连接的 Abaqus INP 文件
-    data.raw_dir/condition_*/<field>.csv: 第一列为帧标识，其余列为节点场值
+    data.raw_dir/condition_*/<field>.csv: 第一列为帧标识，不作为场值导出，其余列为节点场值
 
 输出（位于 data.graph_dir，已有同名文件会被覆盖）:
     graph.pt: 包含 pos [N,D]、edge_index [2,E]、node_ids [N] 的字典
-    node_ids.npy: 统一顺序的有限元节点标签
     condition_*/field_<field>.npy: float32 场数组 [T,N]
-    condition_*/time.npy: 各工况的时间标记 [T]；根目录 time.npy 取首个工况
     N、D、E、T 分别为节点数、坐标维度、有向边数和该工况帧数
 
 处理流程:
@@ -87,7 +85,7 @@ def build(config):
 
     # mesh 文件就是 Abaqus INP 文件，读取节点坐标和单元连接关系
     nodes, elements = read_inp(Path(data["mesh"])) 
-    # 首列作为帧索引，其余列确定场数据的节点集合与初始顺序
+    # 首列作为帧索引，不参与场值导出；其余列确定节点集合与初始顺序
     reference = pd.read_csv(sources[0], index_col=0)
     node_ids = csv_node_ids(reference.columns)
     graph_path = output / "graph.pt"
@@ -128,7 +126,6 @@ def build(config):
     # 共享图只保存一份，各工况另存场数组；已有同名文件会被覆盖
     output.mkdir(parents=True, exist_ok=True)
     torch.save(graph, output / "graph.pt") # 保存图字典为 PyTorch 文件
-    np.save(output / "node_ids.npy", node_ids)
 
     # 3. 第三步，处理各工况的场数据
     for source in sources:
@@ -146,16 +143,6 @@ def build(config):
         folder = output / source.parent.name
         folder.mkdir(exist_ok=True)
         np.save(folder / f"field_{data['field']}.npy", values)
-
-        # 数值索引原样保留；任一索引非有限时，整条轴改用帧编号 × dt
-        # 仅生成时间标记，不重采样场数据，也不校验跨工况时间轴一致性
-        times = pd.to_numeric(table.index, errors="coerce").to_numpy(dtype=np.float64)
-        if not np.isfinite(times).all():
-            times = np.arange(len(table), dtype=np.float64) * data["dt"]
-        np.save(folder / "time.npy", times)
-        if source == sources[0]:
-            # 根目录时间轴仅复制排序后首个工况的结果，不代表所有工况
-            np.save(output / "time.npy", times)
         print(f"{source.parent.name}: field={values.shape}")
     # 4. 第四步，打印图信息
     print(f"Graph: nodes={len(node_ids)}, edges={len(mapped)}, saved to {output}")
