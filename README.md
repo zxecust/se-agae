@@ -35,21 +35,21 @@ python -m pip install -r requirements.txt
 
 INP 和原始 CSV 保留在 ABAQUS 工作路径，使用 `data.mesh`、`data.raw_dir` 独立指定，不复制进大型数据根目录。工况特征表通过 `data.condition_dir` 和 `data.condition_pattern` 指定。相对输入路径统一相对项目根目录；案例中的占位路径须改为实际文件位置。
 
-以 `case_hip_rotor` 的 `stress` 字段为例：
+以 `case_hp_rotor` 的 `stress` 字段为例：
 
 ```text
 项目根目录/
-├── models/case_hip_rotor/stress/
+├── models/case_hp_rotor/stress/
 │   ├── ae/<ae_run>/autoencoder.pt
 │   └── lstm/<lstm_run>/rom.pt
-└── runs/case_hip_rotor/stress/
+└── runs/case_hp_rotor/stress/
     ├── ae/summary.csv
     ├── ae/<ae_run>/{history.csv, metrics.csv, run.json}
     ├── lstm/summary.csv
     ├── lstm/<lstm_run>/{history.csv, metrics.csv, run.json}
     └── pred/<prediction_id>/run.json
 
-D:/ROM/case_hip_rotor/
+D:/ROM/case_hp_rotor/
 ├── graph/stress/
 │   ├── graph.pt
 │   └── condition_*/stress.npy
@@ -67,27 +67,27 @@ D:/ROM/case_hip_rotor/
 1. 设置案例输入路径、目录配置和训练参数，运行构图及 AE 训练：
 
 ```powershell
-python build_graph.py --config configs/case1.json
-python train_ae.py --config configs/case1.json
+python build_graph.py --config configs/case_hp_rotor.json
+python train_ae.py --config configs/case_hp_rotor.json
 ```
 
 2. AE 每次训练自动创建独立编号并打印位置。将选定编号填写到配置的 `selection.ae_run`，再训练 LSTM：
 
 ```powershell
-python train_lstm.py --config configs/case1.json
+python train_lstm.py --config configs/case_hp_rotor.json
 ```
 
 3. 将选定的 LSTM 编号填写到 `selection.lstm_run`，输入新工况进行预测：
 
 ```powershell
-python predict.py --config configs/case1.json --condition C:/ABAQUS/conditions/new_condition.csv
+python predict.py --config configs/case_hp_rotor.json --condition C:/ABAQUS/conditions/new_condition.csv
 ```
 
 也可用 `--model` 显式指定 ROM 文件。`--output` 覆盖预测数据根目录，程序仍追加独立预测编号和工况目录；`--prediction-id` 可指定未使用的新编号。
 
 模型文件保留结构参数、权重、图和归一化参数；AE 潜变量独立放在 `latent` 中。LSTM 只读取明确选择且已完成的 AE 记录和配套潜变量，不自动使用最新模型。ROM 自带对应解码器，因此后续重训 AE 不会改变既有 ROM。
 
-`case_hip_rotor.json` 仍只填写了构图所需输入，训练参数和工况特征需在开始训练前补齐。入口顶部的 `CONFIG_FILE` 用于编辑器直接运行时选择配置，命令行 `--config` 可覆盖。
+`case_hp_rotor.json` ??? HP_Rotor ????????????????????????? case1????????????????????????????????????? startup_time_s????????????????? `CONFIG_FILE` ?????????????????? `--config` ????
 
 ## 查看结果与按需导出
 
