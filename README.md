@@ -50,6 +50,8 @@ python -m pip install -r requirements.txt
 
 ## 基本使用
 
+case1 配置的逐项说明见 [case1 配置说明](configs/case1.md)。
+
 1. 准备网格、物理场和对应的工况序列，并在 `configs/` 中设置数据路径与训练参数。
 2. 在构图和训练入口顶部设置 `CONFIG_FILE`，选择案例配置。
 3. 按顺序执行四个入口：
