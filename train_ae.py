@@ -20,7 +20,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from core.artifacts import model_path, record_dir, reference, run_session, storage_paths, write_rows
+from core.artifacts import make_run_id, model_path, record_dir, reference, run_session, storage_paths, write_rows
 from core.common import batch_graph, fit, load_bundle, load_config, setup
 from core.data import FieldFrames, field_stats, load_fields, split_conditions
 from core.losses import danger_mask, reconstruction_loss
@@ -32,8 +32,16 @@ CONFIG_FILE = "configs/case_hp_rotor.json"
 
 def train(config):
     """训练自编码器，并将模型、潜变量、重构场和训练记录分类保存"""
+    # 先显示启动信息和运行编号，避免大数据准备期间终端长时间没有提示
+    run_id = make_run_id()
+    print(f"[INFO] AE 启动 | case={config['case']} | field={config['data']['field']} | run={run_id}", flush=True)
     device = setup(config)
+    device_text = str(device)
+    if device.type == "cuda":
+        device_text += f" ({torch.cuda.get_device_name(device)})"
+    print(f"[INFO] 计算设备: {device_text}", flush=True)
     paths = storage_paths(config)
+    print("[DATA] 正在读取共享图和工况场数据...", flush=True)
     graph = load_bundle(paths["graph"] / "graph.pt") # 加载图结构，包含 pos、edge_index 和 node_ids
     # 场数据以工况名为键，通过内存映射读取，避免一次载入所有工况
     fields = load_fields(config) # 加载所有工况的场数据，返回 {condition: np.ndarray [T,N]} 字典
@@ -46,7 +54,13 @@ def train(config):
         raise ValueError("export.recon_conditions 包含不存在的工况。")
     # 按完整工况划分，验证集复用训练集全部场值的全局均值和标准差
     split = split_conditions(fields, config["seed"], config["train_ratio"])
+    train_frames = sum(len(fields[name]) for name in split["train"])
+    val_frames = sum(len(fields[name]) for name in split["val"])
+    print(f"[DATA] 工况={len(fields)} (训练={len(split['train'])}, 验证={len(split['val'])}) | "
+          f"快照: 训练={train_frames}, 验证={val_frames}", flush=True)
+    print("[DATA] 正在统计训练场值的归一化参数...", flush=True)
     mean, std = field_stats(fields, split["train"])
+    print("[DATA] 归一化统计完成，正在准备模型...", flush=True)
     # 坐标按各维度独立标准化；torch.std 使用样本标准差，下限避免除零
     pos_mean = graph["pos"].mean(dim=0, keepdim=True)
     pos_std = graph["pos"].std(dim=0, keepdim=True).clamp_min(1e-8)
@@ -82,7 +96,7 @@ def train(config):
         return reconstruction_loss(prediction, x, mask, ae["danger_weight"]), count
 
     # 开始训练，训练记录和潜变量按 run_id 分类保存
-    with run_session(config, "ae") as run:
+    with run_session(config, "ae", run_id) as run:
         run_id = run["run_id"]
         records = record_dir(config, "ae", run_id)
         latent_dir = paths["latent"] / "ae" / run_id
@@ -90,12 +104,14 @@ def train(config):
         # 记录训练集和验证集的工况划分、图文件和数据源
         run["split"] = split
         run["sources"] = {"graph": reference(config, "graph", paths["graph"] / "graph.pt")}
-        print(f"AE: run={run_id}, device={device}, train={split['train']}, val={split['val']}")
+        print(f"[TRAIN] 数据准备完成 | 最多 {ae['epochs']} 轮 | batch={ae['batch_size']} 帧", flush=True)
         # fit 恢复验证损失最低轮次的权重并切换到评估模式
         run["training"] = fit(model, *loaders, step, ae, records / "history.csv") # 执行训练
         # 初始化指标汇总，按验证集所有帧和节点归约
         metrics = []
         val_squares, val_absolute, val_count = 0.0, 0.0, 0
+        recon_total, exported = len(set(recon_names)), 0
+        print(f"[EVAL] 使用最佳模型评估并保存潜变量 | 工况={len(fields)} | 导出重构场={recon_total}", flush=True)
         # 关闭梯度计算，逐工况评估
         with torch.no_grad():
             # 所有工况按原帧顺序导出，潜变量只存于独立的 latent 目录
@@ -131,6 +147,8 @@ def train(config):
                 if reconstructed is not None:
                     reconstructed.flush()
                     del reconstructed
+                    exported += 1
+                    print(f"[EXPORT] 重构场 {exported}/{recon_total}: {name} ({len(fields[name])} 帧)", flush=True)
                 folder = latent_dir / name
                 folder.mkdir()
                 np.save(folder / "z.npy", np.concatenate(parts).astype(np.float32))  # [T,L]
@@ -180,7 +198,9 @@ def train(config):
         }
         if recon_names:
             run["artifacts"]["recon"] = reference(config, "recon", paths["recon"] / "ae" / run_id)
-        print(f"AE 模型：{target}\n潜变量：{latent_dir}\n训练记录：{records}")
+    # 运行记录和汇总表写入完成后，简短提示指标与日志位置
+    print(f"[DONE] AE 完成 | 验证 RMSE={run['metrics']['val_rmse']:.6e} | MAE={run['metrics']['val_mae']:.6e}\n"
+          f"[LOG] 训练记录: {records}", flush=True)
     return run
 
 
