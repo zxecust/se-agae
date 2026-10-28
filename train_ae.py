@@ -34,14 +34,14 @@ def train(config):
     """训练自编码器，并将模型、潜变量、重构场和训练记录分类保存"""
     # 先显示启动信息和运行编号，避免大数据准备期间终端长时间没有提示
     run_id = make_run_id()
-    print(f"[INFO] AE 启动 | case={config['case']} | field={config['data']['field']} | run={run_id}", flush=True)
+    print(f"Starting AE training | case={config['case']} | field={config['data']['field']} | run={run_id}", flush=True)
     device = setup(config)
     device_text = str(device)
     if device.type == "cuda":
         device_text += f" ({torch.cuda.get_device_name(device)})"
-    print(f"[INFO] 计算设备: {device_text}", flush=True)
+    print(f"Device: {device_text}", flush=True)
     paths = storage_paths(config)
-    print("[DATA] 正在读取共享图和工况场数据...", flush=True)
+    print("Loading the shared graph and field data...", flush=True)
     graph = load_bundle(paths["graph"] / "graph.pt") # 加载图结构，包含 pos、edge_index 和 node_ids
     # 场数据以工况名为键，通过内存映射读取，避免一次载入所有工况
     fields = load_fields(config) # 加载所有工况的场数据，返回 {condition: np.ndarray [T,N]} 字典
@@ -56,11 +56,11 @@ def train(config):
     split = split_conditions(fields, config["seed"], config["train_ratio"])
     train_frames = sum(len(fields[name]) for name in split["train"])
     val_frames = sum(len(fields[name]) for name in split["val"])
-    print(f"[DATA] 工况={len(fields)} (训练={len(split['train'])}, 验证={len(split['val'])}) | "
-          f"快照: 训练={train_frames}, 验证={val_frames}", flush=True)
-    print("[DATA] 正在统计训练场值的归一化参数...", flush=True)
+    print(f"Conditions: {len(fields)} (train={len(split['train'])}, val={len(split['val'])}) | "
+            f"Frames: train={train_frames}, val={val_frames}", flush=True)
+    print("Computing training-field normalization statistics...", flush=True)
     mean, std = field_stats(fields, split["train"])
-    print("[DATA] 归一化统计完成，正在准备模型...", flush=True)
+    print("Normalization statistics ready. Preparing the model...", flush=True)
     # 坐标按各维度独立标准化；torch.std 使用样本标准差，下限避免除零
     pos_mean = graph["pos"].mean(dim=0, keepdim=True)
     pos_std = graph["pos"].std(dim=0, keepdim=True).clamp_min(1e-8)
@@ -104,14 +104,14 @@ def train(config):
         # 记录训练集和验证集的工况划分、图文件和数据源
         run["split"] = split
         run["sources"] = {"graph": reference(config, "graph", paths["graph"] / "graph.pt")}
-        print(f"[TRAIN] 数据准备完成 | 最多 {ae['epochs']} 轮 | batch={ae['batch_size']} 帧", flush=True)
+        print(f"Data preparation complete | max_epochs={ae['epochs']} | batch_size={ae['batch_size']} frames", flush=True)
         # fit 恢复验证损失最低轮次的权重并切换到评估模式
         run["training"] = fit(model, *loaders, step, ae, records / "history.csv") # 执行训练
         # 初始化指标汇总，按验证集所有帧和节点归约
         metrics = []
         val_squares, val_absolute, val_count = 0.0, 0.0, 0
         recon_total, exported = len(set(recon_names)), 0
-        print(f"[EVAL] 使用最佳模型评估并保存潜变量 | 工况={len(fields)} | 导出重构场={recon_total}", flush=True)
+        print(f"Evaluating the best model and saving latent sequences | conditions={len(fields)} | reconstructions={recon_total}", flush=True)
         # 关闭梯度计算，逐工况评估
         with torch.no_grad():
             # 所有工况按原帧顺序导出，潜变量只存于独立的 latent 目录
@@ -148,7 +148,7 @@ def train(config):
                     reconstructed.flush()
                     del reconstructed
                     exported += 1
-                    print(f"[EXPORT] 重构场 {exported}/{recon_total}: {name} ({len(fields[name])} 帧)", flush=True)
+                    print(f"Reconstruction export {exported}/{recon_total}: {name} ({len(fields[name])} frames)", flush=True)
                 folder = latent_dir / name
                 folder.mkdir()
                 np.save(folder / "z.npy", np.concatenate(parts).astype(np.float32))  # [T,L]
@@ -199,8 +199,8 @@ def train(config):
         if recon_names:
             run["artifacts"]["recon"] = reference(config, "recon", paths["recon"] / "ae" / run_id)
     # 运行记录和汇总表写入完成后，简短提示指标与日志位置
-    print(f"[DONE] AE 完成 | 验证 RMSE={run['metrics']['val_rmse']:.6e} | MAE={run['metrics']['val_mae']:.6e}\n"
-          f"[LOG] 训练记录: {records}", flush=True)
+    print(f"AE complete | val_rmse={run['metrics']['val_rmse']:.6e} | val_mae={run['metrics']['val_mae']:.6e}\n"
+            f"Run logs: {records}", flush=True)
     return run
 
 

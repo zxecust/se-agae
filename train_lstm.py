@@ -113,7 +113,7 @@ def train(config):
         run["metrics"] = {"val_latent_rmse": float(np.sqrt(val_squares / val_count)),
                           "val_latent_mae": float(val_absolute / val_count)}
         run["artifacts"] = {"model": reference(config, "models", target)}
-        print(f"LSTM 模型：{target}\n训练记录：{records}")
+        print(f"LSTM model: {target}\nRun logs: {records}")
     return run
 
 

@@ -94,7 +94,7 @@ def fit(model, train_loader, val_loader, step, config, history_path):
         epoch_seconds = time.perf_counter() - started
         history.append({"epoch": epoch, "train_loss": losses[0], "val_loss": losses[1],
                         "epoch_seconds": epoch_seconds})
-        print(f"[TRAIN][Epoch {epoch:04d}/{config['epochs']:04d}] "
+        print(f"Epoch {epoch:04d}/{config['epochs']:04d}: "
               f"train={losses[0]:.6e}, val={losses[1]:.6e}, time={epoch_seconds:.2f}s", flush=True)
         if losses[1] < best:
             best, patience = losses[1], 0
@@ -103,7 +103,7 @@ def fit(model, train_loader, val_loader, step, config, history_path):
         else:
             patience += 1
         if patience >= config["patience"]:
-            print(f"[STOP] 验证损失连续 {patience} 轮未改善，提前停止", flush=True)
+            print(f"Early stopping: validation loss has not improved for {patience} epochs.", flush=True)
             break
     model.load_state_dict(best_state)
     model.eval()
@@ -111,7 +111,7 @@ def fit(model, train_loader, val_loader, step, config, history_path):
         writer = csv.DictWriter(stream, fieldnames=["epoch", "train_loss", "val_loss", "epoch_seconds"])
         writer.writeheader()
         writer.writerows(history)
-    print(f"[BEST] 训练结束 | 实际轮数={len(history)} | 最佳轮次={best_epoch} | val={best:.6e}", flush=True)
+    print(f"Training finished | epochs={len(history)} | best_epoch={best_epoch} | best_val_loss={best:.6e}", flush=True)
     return {"best_epoch": best_epoch, "best_val_loss": best, "epochs": len(history)}
 
 
