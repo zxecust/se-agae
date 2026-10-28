@@ -66,11 +66,16 @@ def selected_run(config, stage):
     return run
 
 
+def make_run_id():
+    """生成统一运行编号，允许在耗时的数据准备前显示本次编号"""
+    return datetime.now().astimezone().strftime("%Y%m%d_%H%M%S_%f")
+
+
 @contextmanager
 def run_session(config, stage, run_id=None):
     """独立记录一次训练或预测；已有编号直接报错，不覆盖历史产物"""
     started = datetime.now().astimezone()
-    run_id = run_id or started.strftime("%Y%m%d_%H%M%S_%f")
+    run_id = run_id or make_run_id()
     if not run_id or run_id in (".", "..") or any(char in run_id for char in '/\\:'):
         raise ValueError("运行编号必须是单个目录名。")
     directory = record_dir(config, stage, run_id)
