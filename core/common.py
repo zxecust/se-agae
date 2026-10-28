@@ -5,6 +5,7 @@ import copy
 import csv
 import json
 import random
+import time
 from pathlib import Path
 
 import numpy as np
@@ -58,13 +59,18 @@ def batch_graph(graph, count, device):
 
 
 def fit(model, train_loader, val_loader, step, config, history_path):
-    """按 step 返回的计数统计损失，恢复最佳验证权重并返回最佳轮次信息"""
+    """按 step 的计数统计损失与单轮耗时，恢复最佳验证权重并返回最佳轮次信息"""
     if config["epochs"] < 1 or config["patience"] < 1:
         raise ValueError("epochs 和 patience 必须为正整数。")
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"])
     best, best_state, patience, best_epoch = float("inf"), None, 0, 0
     history = []
+    device = next(model.parameters()).device
     for epoch in range(1, config["epochs"] + 1):
+        # CUDA 同步使计时覆盖本轮训练与验证，不计入上一阶段尚未完成的工作
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        started = time.perf_counter()
         losses = []
         for training, loader in ((True, train_loader), (False, val_loader)):
             model.train(training)
@@ -83,8 +89,13 @@ def fit(model, train_loader, val_loader, step, config, history_path):
                     total += loss.item() * size
                     count += size
             losses.append(total / count)
-        history.append({"epoch": epoch, "train_loss": losses[0], "val_loss": losses[1]})
-        print(f"Epoch {epoch:04d}: train={losses[0]:.6e}, val={losses[1]:.6e}")
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        epoch_seconds = time.perf_counter() - started
+        history.append({"epoch": epoch, "train_loss": losses[0], "val_loss": losses[1],
+                        "epoch_seconds": epoch_seconds})
+        print(f"[TRAIN][Epoch {epoch:04d}/{config['epochs']:04d}] "
+              f"train={losses[0]:.6e}, val={losses[1]:.6e}, time={epoch_seconds:.2f}s", flush=True)
         if losses[1] < best:
             best, patience = losses[1], 0
             best_epoch = epoch
@@ -92,13 +103,15 @@ def fit(model, train_loader, val_loader, step, config, history_path):
         else:
             patience += 1
         if patience >= config["patience"]:
+            print(f"[STOP] 验证损失连续 {patience} 轮未改善，提前停止", flush=True)
             break
     model.load_state_dict(best_state)
     model.eval()
     with history_path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=["epoch", "train_loss", "val_loss"])
+        writer = csv.DictWriter(stream, fieldnames=["epoch", "train_loss", "val_loss", "epoch_seconds"])
         writer.writeheader()
         writer.writerows(history)
+    print(f"[BEST] 训练结束 | 实际轮数={len(history)} | 最佳轮次={best_epoch} | val={best:.6e}", flush=True)
     return {"best_epoch": best_epoch, "best_val_loss": best, "epochs": len(history)}
 
 
