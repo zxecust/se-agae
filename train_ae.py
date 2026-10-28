@@ -16,6 +16,8 @@
     按工况划分数据 → 归一化 → 训练并恢复最佳验证模型 → 分别保存模型、潜变量和记录
 """
 
+from functools import lru_cache
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -69,14 +71,12 @@ def train(config):
     # FieldFrames 将序列拆成单帧并归一化及可选限幅，batch_size 按快照数计
     # 批数据为 [B,N,1]，B 为当前 batch 的场快照数
     loaders = [DataLoader(
-        # 将所选工况的场值按帧拆分为单帧样本，归一化后可选限幅
         FieldFrames(fields, split[key], mean, std, ae["clamp_normalized"]),
-        batch_size=ae["batch_size"],  # 将多帧场值组成一个 batch，按快照数计
+        batch_size=ae["batch_size"],
         shuffle=(key == "train")
         ) 
         for key in ("train", "val")
     ]
-    # 创建自编码器
     model = Autoencoder(graph["pos"].shape[1], config["model"]).to(device)
     # 危险节点按有限元标签配置，映射下标后扩展 BFS 邻居，生成单图 mask [N]
     mask = danger_mask(
@@ -86,18 +86,22 @@ def train(config):
         ae["danger_neighbors"]
     ).to(device)
 
+    @lru_cache(maxsize=3)
+    def graph_for_batch(count):
+        """按帧数复用固定批图，最多保留三种大小以限制显存占用"""
+        return batch_graph(graph, count, device)
+
     def step(values):
         """返回归一化场值的重构损失及快照数，用于轮次损失加权"""
         count = len(values)
-        # 每帧复制一张独立图，batch 记录展平后各节点所属的快照
-        pos, edges, batch = batch_graph(graph, count, device)
+        # 每帧对应一张独立图，batch 记录展平后各节点所属的快照
+        pos, edges, batch = graph_for_batch(count)
         x = values.to(device).reshape(-1, 1)  # [B,N,1] → [B*N,1]
         prediction = model(x, pos, edges, batch) # 预测结果 [B*N,1]，按节点顺序与 x 对齐
         return reconstruction_loss(prediction, x, mask, ae["danger_weight"]), count
 
     # 开始训练，训练记录和潜变量按 run_id 分类保存
     with run_session(config, "ae", run_id) as run:
-        run_id = run["run_id"]
         records = record_dir(config, "ae", run_id)
         latent_dir = paths["latent"] / "ae" / run_id
         latent_dir.mkdir(parents=True, exist_ok=False)
@@ -129,7 +133,7 @@ def train(config):
                 # frame 是工况内的帧偏移，count 累计场值个数而不是帧数
                 parts, squares, absolute, count, frame = [], 0.0, 0.0, 0, 0
                 for values in loader:
-                    pos, edges, batch = batch_graph(graph, len(values), device)
+                    pos, edges, batch = graph_for_batch(len(values))
                     z = model.encoder(values.to(device).reshape(-1, 1), pos, edges, batch)  # [B,L]
                     reconstruction = model.decoder(z, pos, edges, batch).reshape(len(values), -1)
                     # 反归一化后与未限幅的原始场值比较，误差保持字段原始单位
@@ -175,17 +179,14 @@ def train(config):
                 },
             # 图结构和归一化参数
             "graph": graph, 
-            # 坐标归一化参数
-            "position_mean": pos_mean, 
-            "position_std": pos_std,
             # 场归一化参数
-            "field_mean": mean, ""
+            "field_mean": mean,
             "field_std": std,
         }
         # 保存模型文件和训练指标
         target = model_path(config, "ae", run_id)
         torch.save(bundle, target)
-        write_rows(records / "metrics.csv", metrics) # 保存主公狂评估表
+        write_rows(records / "metrics.csv", metrics) # 保存逐工况评估表
         # 汇总指标按全部验证帧和节点归约，不对工况 RMSE 再做简单平均
         run["metrics"] = {
             "val_rmse": float(np.sqrt(val_squares / val_count)),

@@ -7,8 +7,10 @@ from torch.nn import functional as F
 
 
 def danger_mask(node_ids, edge_index, labels, neighbor_count):
-    """每个危险节点增加最多 neighbor_count 个 BFS 邻居；重叠节点只计一次。"""
+    """每个危险节点增加最多 neighbor_count 个 BFS 邻居；重叠节点只计一次"""
     mask = torch.zeros(len(node_ids), dtype=torch.bool)
+    if not labels:
+        return mask
     adjacency = [[] for _ in node_ids]
     for source, target in edge_index.t().tolist():
         adjacency[source].append(target)
