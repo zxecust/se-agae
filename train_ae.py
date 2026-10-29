@@ -34,7 +34,8 @@ CONFIG_FILE = "configs/case_hp_rotor.json"
 
 def train(config):
     """训练自编码器，并将模型、潜变量、重构场和训练记录分类保存"""
-    # 先显示启动信息和运行编号，避免大数据准备期间终端长时间没有提示
+    # 1. 初始化运行，读取并校验图与场数据
+    # 数据准备前显示编号，便于确认程序已启动
     run_id = make_run_id()
     print(f"Starting AE training | case={config['case']} | field={config['data']['field']} | run={run_id}", flush=True)
     device = setup(config)
@@ -44,17 +45,19 @@ def train(config):
     print(f"Device: {device_text}", flush=True)
     paths = storage_paths(config)
     print("Loading the shared graph and field data...", flush=True)
-    graph = load_bundle(paths["graph"] / "graph.pt") # 加载图结构，包含 pos、edge_index 和 node_ids
-    # 场数据以工况名为键，通过内存映射读取，避免一次载入所有工况
-    fields = load_fields(config) # 加载所有工况的场数据，返回 {condition: np.ndarray [T,N]} 字典
+    graph = load_bundle(paths["graph"] / "graph.pt")
+    # 各工况场数组 [T,N] 采用只读内存映射，避免一次加载全部数据
+    fields = load_fields(config)
     # 验证场数据的形状与图一致，且配置中指定的重构工况必须存在
     for name, values in fields.items():
         if values.ndim != 2 or values.shape[1] != len(graph["pos"]) or len(values) == 0:
             raise ValueError(f"{name} 场数据应为非空 [T,N]，且 N 与图一致。")
-    recon_names = config["export"]["recon_conditions"] # 按需导出的重构工况列表
+    recon_names = config["export"]["recon_conditions"]
     if set(recon_names) - set(fields):
         raise ValueError("export.recon_conditions 包含不存在的工况。")
-    # 按完整工况划分，验证集复用训练集全部场值的全局均值和标准差
+
+    # 2. 划分工况，准备归一化、数据加载器与模型
+    # 按完整工况划分；场值统计仅使用训练工况，验证集复用
     split = split_conditions(fields, config["seed"], config["train_ratio"])
     train_frames = sum(len(fields[name]) for name in split["train"])
     val_frames = sum(len(fields[name]) for name in split["val"])
@@ -68,8 +71,7 @@ def train(config):
     pos_std = graph["pos"].std(dim=0, keepdim=True).clamp_min(1e-8)
     graph["pos"] = (graph["pos"] - pos_mean) / pos_std
     ae = config["autoencoder"]
-    # FieldFrames 将序列拆成单帧并归一化及可选限幅，batch_size 按快照数计
-    # 批数据为 [B,N,1]，B 为当前 batch 的场快照数
+    # FieldFrames 逐帧归一化并可选限幅，batch 为 [B,N,1]，B 为快照数
     loaders = [DataLoader(
         FieldFrames(fields, split[key], mean, std, ae["clamp_normalized"]),
         batch_size=ae["batch_size"],
@@ -97,28 +99,27 @@ def train(config):
         # 每帧对应一张独立图，batch 记录展平后各节点所属的快照
         pos, edges, batch = graph_for_batch(count)
         x = values.to(device).reshape(-1, 1)  # [B,N,1] → [B*N,1]
-        prediction = model(x, pos, edges, batch) # 预测结果 [B*N,1]，按节点顺序与 x 对齐
+        prediction = model(x, pos, edges, batch)
         return reconstruction_loss(prediction, x, mask, ae["danger_weight"]), count
 
-    # 开始训练，训练记录和潜变量按 run_id 分类保存
+    # 3. 训练 AE，并恢复最佳验证权重
     with run_session(config, "ae", run_id) as run:
         records = record_dir(config, "ae", run_id)
         latent_dir = paths["latent"] / "ae" / run_id
         latent_dir.mkdir(parents=True, exist_ok=False)
-        # 记录训练集和验证集的工况划分、图文件和数据源
         run["split"] = split
         run["sources"] = {"graph": reference(config, "graph", paths["graph"] / "graph.pt")}
         print(f"Data preparation complete | max_epochs={ae['epochs']} | batch_size={ae['batch_size']} frames", flush=True)
-        # fit 恢复验证损失最低轮次的权重并切换到评估模式
-        run["training"] = fit(model, *loaders, step, ae, records / "history.csv") # 执行训练
-        # 初始化指标汇总，按验证集所有帧和节点归约
+        # fit 返回前切换到评估模式，并保存逐轮记录
+        run["training"] = fit(model, *loaders, step, ae, records / "history.csv")
+
+        # 4. 评估最佳模型，导出潜变量和指定工况的重构场
         metrics = []
         val_squares, val_absolute, val_count = 0.0, 0.0, 0
         recon_total, exported = len(set(recon_names)), 0
         print(f"Evaluating the best model and saving latent sequences | conditions={len(fields)} | reconstructions={recon_total}", flush=True)
-        # 关闭梯度计算，逐工况评估
         with torch.no_grad():
-            # 所有工况按原帧顺序导出，潜变量只存于独立的 latent 目录
+            # 按原帧顺序生成潜变量，保持后续 LSTM 序列对应关系
             for name in fields:
                 dataset = FieldFrames(fields, [name], mean, std, ae["clamp_normalized"])
                 loader = DataLoader(dataset, batch_size=ae["batch_size"])
@@ -138,16 +139,15 @@ def train(config):
                     reconstruction = model.decoder(z, pos, edges, batch).reshape(len(values), -1)
                     # 反归一化后与未限幅的原始场值比较，误差保持字段原始单位
                     physical = reconstruction.cpu().numpy() * std + mean
-                    # 计算 RMSE 和 MAE，按帧和节点归约
                     difference = physical.astype(np.float64) - fields[name][frame:frame + len(values)]
                     squares += np.square(difference).sum()
                     absolute += np.abs(difference).sum()
                     count += difference.size
-                    if reconstructed is not None: # 仅导出配置明确指定的工况
+                    if reconstructed is not None:
                         reconstructed[frame:frame + len(values)] = physical
                     frame += len(values)
                     parts.append(z.cpu().numpy())
-                # 完成当前工况重构文件的写入
+                # 写回重构场后再报告当前工况导出完成
                 if reconstructed is not None:
                     reconstructed.flush()
                     del reconstructed
@@ -163,43 +163,42 @@ def train(config):
                     val_squares += squares
                     val_absolute += absolute
                     val_count += count
-        # 模型保留标准化图和归一化参数；不嵌入潜变量或完整物理场
+
+        # 5. 保存最佳模型、评估指标和产物记录
+        # 潜变量和完整重构场独立存放，不嵌入模型包
         bundle = {
             # 模型身份与来源
             "case": config["case"], 
             "field": config["data"]["field"], 
             "stage": "ae", 
             "run_id": run_id,
-            # 模型配置和权重
             "model_config": config["model"],
-            # 最佳模型参数
+            # 最佳权重转到 CPU 后保存
             "state_dict": {
                 key: value.cpu() 
                 for key, value in model.state_dict().items()
                 },
-            # 图结构和归一化参数
+            # 标准化图和场值归一化参数
             "graph": graph, 
-            # 场归一化参数
             "field_mean": mean,
             "field_std": std,
         }
-        # 保存模型文件和训练指标
         target = model_path(config, "ae", run_id)
         torch.save(bundle, target)
-        write_rows(records / "metrics.csv", metrics) # 保存逐工况评估表
+        write_rows(records / "metrics.csv", metrics)
         # 汇总指标按全部验证帧和节点归约，不对工况 RMSE 再做简单平均
         run["metrics"] = {
             "val_rmse": float(np.sqrt(val_squares / val_count)),
             "val_mae": float(val_absolute / val_count)
         }
-        # 保存模型、潜变量和重构场的相对路径到 run.json，便于后续引用
+        # 产物使用逻辑根目录和相对路径引用，便于迁移
         run["artifacts"] = {
             "model": reference(config, "models", target),
             "latent": reference(config, "latent", latent_dir)
         }
         if recon_names:
             run["artifacts"]["recon"] = reference(config, "recon", paths["recon"] / "ae" / run_id)
-    # 运行记录和汇总表写入完成后，简短提示指标与日志位置
+    # 退出运行上下文后，运行记录和汇总表已写入
     print(f"AE complete | val_rmse={run['metrics']['val_rmse']:.6e} | val_mae={run['metrics']['val_mae']:.6e}\n"
             f"Run logs: {records}", flush=True)
     return run
