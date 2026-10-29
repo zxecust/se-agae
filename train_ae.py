@@ -13,7 +13,7 @@
     graph、latent、recon 目录相对 paths.data_root，T、N、L 为帧数、节点数和潜变量维度
 
 处理流程:
-    按工况划分数据 → 归一化 → 训练并恢复最佳验证模型 → 分别保存模型、潜变量和记录
+    按工况划分数据 → 归一化 → 训练并保存最佳模型 → 评估与导出 → 完成运行记录
 """
 
 from functools import lru_cache
@@ -102,18 +102,40 @@ def train(config):
         prediction = model(x, pos, edges, batch)
         return reconstruction_loss(prediction, x, mask, ae["danger_weight"]), count
 
-    # 3. 训练 AE，并恢复最佳验证权重
+    # 3. 训练 AE，恢复并保存最佳验证模型
     with run_session(config, "ae", run_id) as run:
         records = record_dir(config, "ae", run_id)
         latent_dir = paths["latent"] / "ae" / run_id
-        latent_dir.mkdir(parents=True, exist_ok=False)
         run["split"] = split
         run["sources"] = {"graph": reference(config, "graph", paths["graph"] / "graph.pt")}
         print(f"Data preparation complete | max_epochs={ae['epochs']} | batch_size={ae['batch_size']} frames", flush=True)
         # fit 返回前切换到评估模式，并保存逐轮记录
         run["training"] = fit(model, *loaders, step, ae, records / "history.csv")
+        # 先保存最佳模型，避免后续评估或导出失败导致训练结果丢失
+        bundle = {
+            # 模型身份与来源
+            "case": config["case"],
+            "field": config["data"]["field"],
+            "stage": "ae",
+            "run_id": run_id,
+            "model_config": config["model"],
+            # 最佳权重转到 CPU 后保存
+            "state_dict": {
+                key: value.cpu()
+                for key, value in model.state_dict().items()
+                },
+            # 标准化图和场值归一化参数
+            "graph": graph,
+            "field_mean": mean,
+            "field_std": std,
+        }
+        target = model_path(config, "ae", run_id)
+        torch.save(bundle, target)
+        run["artifacts"] = {"model": reference(config, "models", target)}
 
         # 4. 评估最佳模型，导出潜变量和指定工况的重构场
+        # 在导出阶段创建目录，避免长时间训练期间依赖预先创建的空目录
+        latent_dir.mkdir(parents=True, exist_ok=False)
         metrics = []
         val_squares, val_absolute, val_count = 0.0, 0.0, 0
         recon_total, exported = len(set(recon_names)), 0
@@ -154,7 +176,7 @@ def train(config):
                     exported += 1
                     print(f"Reconstruction export {exported}/{recon_total}: {name} ({len(fields[name])} frames)", flush=True)
                 folder = latent_dir / name
-                folder.mkdir()
+                folder.mkdir(parents=True)
                 np.save(folder / "z.npy", np.concatenate(parts).astype(np.float32))  # [T,L]
                 is_train = name in split["train"]
                 metrics.append({"condition": name, "split": "train" if is_train else "val",
@@ -164,27 +186,7 @@ def train(config):
                     val_absolute += absolute
                     val_count += count
 
-        # 5. 保存最佳模型、评估指标和产物记录
-        # 潜变量和完整重构场独立存放，不嵌入模型包
-        bundle = {
-            # 模型身份与来源
-            "case": config["case"], 
-            "field": config["data"]["field"], 
-            "stage": "ae", 
-            "run_id": run_id,
-            "model_config": config["model"],
-            # 最佳权重转到 CPU 后保存
-            "state_dict": {
-                key: value.cpu() 
-                for key, value in model.state_dict().items()
-                },
-            # 标准化图和场值归一化参数
-            "graph": graph, 
-            "field_mean": mean,
-            "field_std": std,
-        }
-        target = model_path(config, "ae", run_id)
-        torch.save(bundle, target)
+        # 5. 保存评估指标和产物记录
         write_rows(records / "metrics.csv", metrics)
         # 汇总指标按全部验证帧和节点归约，不对工况 RMSE 再做简单平均
         run["metrics"] = {
@@ -192,10 +194,7 @@ def train(config):
             "val_mae": float(val_absolute / val_count)
         }
         # 产物使用逻辑根目录和相对路径引用，便于迁移
-        run["artifacts"] = {
-            "model": reference(config, "models", target),
-            "latent": reference(config, "latent", latent_dir)
-        }
+        run["artifacts"]["latent"] = reference(config, "latent", latent_dir)
         if recon_names:
             run["artifacts"]["recon"] = reference(config, "recon", paths["recon"] / "ae" / run_id)
     # 退出运行上下文后，运行记录和汇总表已写入
