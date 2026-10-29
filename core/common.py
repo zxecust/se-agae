@@ -94,7 +94,7 @@ def fit(model, train_loader, val_loader, step, config, history_path):
         epoch_seconds = time.perf_counter() - started
         history.append({"epoch": epoch, "train_loss": losses[0], "val_loss": losses[1],
                         "epoch_seconds": epoch_seconds})
-        print(f"Epoch {epoch:04d}/{config['epochs']:04d}: "
+        print(f"Epoch {epoch:04d}: "
               f"train={losses[0]:.6e}, val={losses[1]:.6e}, time={epoch_seconds:.2f}s", flush=True)
         if losses[1] < best:
             best, patience = losses[1], 0
