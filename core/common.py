@@ -1,4 +1,4 @@
-"""配置、图批处理和两个训练阶段共用的短训练循环"""
+"""通用工具模块：提供配置加载、设备设置、批图构建和公共训练循环"""
 
 import argparse
 import copy
@@ -95,7 +95,7 @@ def fit(model, train_loader, val_loader, step, config, history_path):
         history.append({"epoch": epoch, "train_loss": losses[0], "val_loss": losses[1],
                         "epoch_seconds": epoch_seconds})
         print(f"Epoch {epoch:04d}: "
-              f"train={losses[0]:.6e}, val={losses[1]:.6e}, time={epoch_seconds:.2f}s", flush=True)
+                f"train={losses[0]:.6e}, val={losses[1]:.6e}, time={epoch_seconds:.2f}s", flush=True)
         if losses[1] < best:
             best, patience = losses[1], 0
             best_epoch = epoch
