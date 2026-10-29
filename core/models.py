@@ -1,4 +1,4 @@
-"""GraphSAGE 自编码器与 LSTM；结构来自 gnn-based-rom。"""
+"""网络模型模块：定义图自编码器和工况序列到潜变量的 LSTM 预测器"""
 
 import torch
 from torch import nn
