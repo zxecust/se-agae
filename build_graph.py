@@ -36,13 +36,13 @@ def read_inp(path):
     with path.open(encoding="utf-8", errors="ignore") as stream:
         for raw in stream:
             line = raw.strip()
-            if not line or line.startswith("**"):  # 跳过空行和注释行
+            if not line or line.startswith("**"):
                 continue
-            if line.startswith("*"): # 识别关键字行
+            if line.startswith("*"):
                 if pending: 
-                    # 如果前一单元数据还没有完成，报错避免保存不完整的单元连接关系
+                    # 关键字不能打断尚未完成的单元续行
                     raise ValueError("INP 单元连接行未完成。")
-                keyword = line.split(",")[0].lower() # 按逗号分隔关键字并转化为小写
+                keyword = line.split(",")[0].lower()
                 mode = keyword if keyword in ("*node", "*element") else None
                 continue
             if mode is None:
@@ -50,7 +50,7 @@ def read_inp(path):
             parts = [part.strip() for part in line.split(",") if part.strip()]
             if mode == "*node":
                 label = int(parts[0])
-                if label in nodes: # 节点编号必须唯一
+                if label in nodes:
                     raise ValueError("INP 节点编号重复；请提供单个网格，先合并或重编号多个实例。")
                 nodes[label] = [float(value) for value in parts[1:]]
             elif mode == "*element":
@@ -68,38 +68,36 @@ def csv_node_ids(columns):
     """按列顺序提取列名中的首组数字作为节点标签，并拒绝重复标签"""
     labels = []
     for column in columns:
-        match = re.search(r"\d+", str(column)) # 匹配列名中的首个数字序列
+        match = re.search(r"\d+", str(column))
         if match is None:
             raise ValueError(f"字段列名无法解析节点编号：{column}")
-        labels.append(int(match.group())) # 取出匹配内容，转化为整数并保存
-    if len(set(labels)) != len(labels): # 检查是否有重复节点编号；set() 会去重，如果长度不一致说明有重复
+        labels.append(int(match.group()))
+    if len(set(labels)) != len(labels):
         raise ValueError("字段 CSV 含重复节点编号。")
     return labels
 
 
 def build(config):
     """统一各工况的节点顺序，构建并校验共享图，导出所选字段"""
-    # 读取独立配置的 ABAQUS 输入路径和图输出目录
+    # 1. 读取网格与字段表头，确定共享节点顺序
     data = config["data"]
     if not data["raw_dir"] or not data["mesh"]:
         raise ValueError("请设置 data.raw_dir 和 data.mesh，指向原始 CSV 与 INP 文件。")
     root, output = Path(data["raw_dir"]), storage_paths(config)["graph"]
-    # 按工况目录名排序并拼接字段路径；文件是否存在由后续读取确认
+    # 按工况目录名排序，逐个处理所选字段
     sources = [folder / f"{data['field']}.csv" for folder in sorted(root.glob("condition_*")) if folder.is_dir()]
     if not sources:
         raise FileNotFoundError(f"没有找到 condition_*/{data['field']}.csv：{root}")
 
-    # mesh 文件就是 Abaqus INP 文件，读取节点坐标和单元连接关系
     nodes, elements = read_inp(Path(data["mesh"])) 
     # 仅读取表头；首列为帧标识，其余列确定节点集合与初始顺序
     reference = pd.read_csv(sources[0], index_col=0, nrows=0)
     node_ids = csv_node_ids(reference.columns)
     node_set = set(node_ids)
     graph_path = output / "graph.pt"
-    # 如果已有图文件存在，加载并检查节点集合是否一致；若不一致则报错，要求使用独立的 graph_dir
     existing = load_bundle(graph_path) if graph_path.is_file() else None
     if existing is not None:
-        # 集合比较忽略列顺序；节点集合相同后沿用已有图顺序，供不同字段共用
+        # 节点集合相同时沿用已有图顺序，允许 CSV 列顺序不同
         existing_ids = existing["node_ids"].tolist()
         if node_set != set(existing_ids):
             raise ValueError("当前字段节点与已有图不同，请使用独立 graph_dir。")
@@ -107,7 +105,7 @@ def build(config):
     # 有限元标签可能不连续，转换为图计算使用的 0..N-1 下标
     index = {label: i for i, label in enumerate(node_ids)}
 
-    # 构建图的边集合
+    # 2. 构建、校验并保存共享图
     # 同单元内任意两节点双向连边，不限于几何棱边；集合去重，不额外排序
     edges = set()
     for element in elements:
@@ -119,7 +117,6 @@ def build(config):
     mapped = [(index[a], index[b]) for a, b in edges if a in index and b in index]
     if not mapped:
         raise ValueError("对齐 CSV 节点后，图中没有边。")
-    # 将坐标、边和节点标签组织为图字典
     graph = {
         # 坐标行顺序与 node_ids 一致；此处保留原始坐标，不做标准化
         "pos": torch.tensor([nodes[label] for label in node_ids], dtype=torch.float32),
@@ -131,23 +128,23 @@ def build(config):
     # 精确比较图张量，边的排列顺序不同也视为不一致
     if existing is not None and any(not torch.equal(graph[key], existing[key]) for key in graph):
         raise ValueError("网格与已有图不同，请使用独立 graph_dir。")
-    # 已有一致的图保留不重写，各工况场数组仍按需覆盖
+    # 只创建尚不存在的图，已有图通过上述校验后保留
     output.mkdir(parents=True, exist_ok=True)
     if existing is None:
         torch.save(graph, graph_path)
 
-    # 处理各工况的场数据
+    # 3. 按图节点顺序导出各工况场数组
     for source in sources:
         table = pd.read_csv(source, index_col=0)
         labels = csv_node_ids(table.columns)
         # 各工况可采用不同列顺序，但节点集合必须与共享图完全一致
         if set(labels) != node_set:
             raise ValueError(f"字段的节点集合不一致：{source}")
-        # lookup 映射节点标签到当前 CSV 的列下标，供后续按图顺序取列
+        # 节点标签映射到 CSV 列下标，以图顺序取列
         lookup = {label: i for i, label in enumerate(labels)}
         # 保留全部帧并按图顺序取列，生成 float32 [T,N]；检查有限值，不做归一化
         values = finite(table.iloc[:, [lookup[label] for label in node_ids]].to_numpy(dtype=np.float32), source)
-        if len(values) == 0: # 检查帧数是否为零，避免保存空数组
+        if len(values) == 0:
             raise ValueError(f"场序列为空：{source}")
         folder = output / source.parent.name
         folder.mkdir(exist_ok=True)
