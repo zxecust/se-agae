@@ -13,6 +13,8 @@ train_lstm.py：工况序列 + 指定 AE 的潜变量 → 最佳 ROM 模型
 predict.py：新工况 + 指定 ROM → 预测潜变量和物理场
 ```
 
+入口脚本组织流程，`core/` 提供数据、网络、损失、训练和产物管理的公共实现；后续开发与注释规则见 [AGENTS.md](AGENTS.md)
+
 ## 环境依赖
 
 使用 Python 3.10 或更新版本，安装 NumPy、pandas、PyTorch 和 PyTorch Geometric：
@@ -83,11 +85,13 @@ python train_lstm.py --config configs/case_hp_rotor.json
 python predict.py --config configs/case_hp_rotor.json --condition C:/ABAQUS/conditions/new_condition.csv
 ```
 
-也可用 `--model` 显式指定 ROM 文件。`--output` 覆盖预测数据根目录，程序仍追加独立预测编号和工况目录；`--prediction-id` 可指定未使用的新编号。
+也可用 `--model` 显式指定 ROM 文件。`--output` 仅覆盖预测物理场根目录，潜变量和记录仍使用配置路径；程序追加独立预测编号和工况目录，`--prediction-id` 可指定未使用的新编号。`--batch-size` 仅控制每批解码帧数，LSTM 一次处理完整工况序列。
 
-模型文件保留结构参数、权重、图和归一化参数；AE 潜变量独立放在 `latent` 中。LSTM 只读取明确选择且已完成的 AE 记录和配套潜变量，不自动使用最新模型。ROM 自带对应解码器，因此后续重训 AE 不会改变既有 ROM。
+模型文件保留结构参数、权重、图和归一化参数；AE 潜变量独立放在 `latent` 中。LSTM 只读取明确选择且已完成的 AE 记录和配套潜变量，不自动使用最新模型。ROM 自带对应解码器，因此后续重训 AE 不会改变既有 ROM 的配套权重。
 
-`case_hp_rotor.json` 是当前保留的案例配置，默认处理 HP_Rotor 应力场，模型与训练参数参考原 case1，危险区域附加损失已关闭。工况特征按真实列名设置，已包含 startup_time_s，因此不额外添加帧编号。入口顶部的 `CONFIG_FILE` 用于编辑器直接运行时选择配置，命令行 `--config` 可覆盖。
+AE 在训练结束后先保存最佳模型，再评估和导出；后处理失败时保留已保存模型，运行记录标为失败。当前不支持训练中途断点续训。
+
+`case_hp_rotor.json` 是当前保留的案例配置，默认处理 HP_Rotor 应力场，危险区域附加损失已关闭。工况特征按真实列名设置，已包含 startup_time_s，因此不额外添加帧编号。入口顶部的 `CONFIG_FILE` 用于编辑器直接运行时选择配置，命令行 `--config` 可覆盖。训练参数从 JSON 读取；预测还可使用 `predict.py` 顶部默认参数或命令行覆盖，网络、特征和归一化参数以所选 ROM 为准。
 
 ## 查看结果与按需导出
 
@@ -102,4 +106,4 @@ AE 汇总 RMSE、MAE 按全部验证工况的所有帧和节点统计；LSTM 汇
 
 配置 `export.recon_conditions` 指定需要保存完整 AE 重构场的工况，默认空列表仅计算误差。预测默认保存 NPY；`export.pred_csv=true` 或命令行 `--csv` 才额外导出 CSV。
 
-训练数据和模型目录不纳入版本管理。旧模型包及旧目录没有自动回退或迁移逻辑；本次命名与目录调整后，已有数据需按新配置明确迁移或重新生成。
+训练数据和模型目录不纳入版本管理。旧模型包及旧目录没有自动回退或迁移逻辑，已有数据需按配置明确迁移或重新生成。
